@@ -19,10 +19,16 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     //1. create input constraint
     std::vector<double> lb(dim_xu);
     std::vector<double> ub(dim_xu);
-    for(int i=0; i<dim_x*horizon; ++i)
+    for(int i=0; i<horizon; ++i)
     {
-        lb[i] = -HUGE_VAL;
-        ub[i] =  HUGE_VAL;
+        lb[i*dim_x] = -HUGE_VAL;
+        ub[i*dim_x] =  HUGE_VAL;
+        lb[i*dim_x+1] = -HUGE_VAL;
+        ub[i*dim_x+1] =  HUGE_VAL;
+        lb[i*dim_x+2] =  0.0;
+        ub[i*dim_x+2] =  2.2;
+        lb[i*dim_x+3] = -HUGE_VAL;
+        ub[i*dim_x+3] =  HUGE_VAL;
     }
     for(int i=dim_x*horizon; i<dim_xu; i+=dim_u)
     {
@@ -99,7 +105,7 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
         {
             std::cout << "x:     " << x[i*dim_x]   - x_ref[i](0) << std::endl;
             std::cout << "y:     " << x[i*dim_x+1] - x_ref[i](1) << std::endl;
-            std::cout << "v:     " << x[i*dim_x+2] - x_ref[i](2) << std::endl;
+            std::cout << "v:     " << x[i*dim_x+2] << " " <<  x_ref[i](2) << std::endl;
             std::cout << "yaw:   " << x[i*dim_x+3] - x_ref[i](3) << std::endl;
         }
 

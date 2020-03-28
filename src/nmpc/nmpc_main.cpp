@@ -20,14 +20,6 @@ int main(int argc, char** argv)
     VecOfVecXd x_ref, u_ref;
     ref_generator.generate(x0, vehicle_ptr, dim_x, dim_u, horizon, dt, x_ref, u_ref);
 
-    for(int i=0; i<x_ref.size(); ++i)
-    {
-        std::cout << "x:   " << x_ref[i](0) << std::endl;
-        std::cout << "y:   " << x_ref[i](1) << std::endl;
-        std::cout << "v:   " << x_ref[i](2) << std::endl;
-        std::cout << "yaw: " << x_ref[i](3) << std::endl;
-    }
-
     VecOfVecXd u_optimal;
     controller.calculateOptimalCommand(x_ref, u_ref, vehicle_ptr, dt, u_optimal);
 
