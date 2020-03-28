@@ -5,14 +5,14 @@
 #include <memory>
 #include <Eigen/Eigen>
 #include <vector>
-#include "utils.h"
+#include "nmpc/nmpc_utils.h"
 
-class Vehicle
+class VehicleModel
 {
 public:
-    Vehicle(const int dim_x, const int dim_u);
+    VehicleModel(const int dim_x, const int dim_u);
 
-
+    Eigen::VectorXd calcNextState(const Eigen::VectorXd& x_curr, const Eigen::VectorXd& u, const double dt);
 
     int getDimX(){return dim_x_;}
     int getDimU(){return dim_u_;}
