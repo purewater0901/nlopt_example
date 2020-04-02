@@ -7,9 +7,9 @@ int main(int argc, char** argv)
 {
     int dim_x = 4;
     int dim_u = 2;
-    int horizon = 70;
-    double dt = 0.1;
-    double x_tolerance = 1e-4;
+    int horizon = 30;
+    double dt = 0.3;
+    double x_tolerance = 1e-3;
 
     RefGenerator ref_generator;
     NMPCController controller(x_tolerance);

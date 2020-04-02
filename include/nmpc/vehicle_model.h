@@ -9,10 +9,12 @@
 
 typedef struct
 {
+    int horizon_;
     int dim_x_;
     int dim_u_;
-    int horizon_;
     double dt_;
+    int state_id_;
+    int input_id_;
 }VehicleDynamicsData;
 
 class VehicleModel
@@ -22,7 +24,11 @@ public:
 
     Eigen::VectorXd calcNextState(const Eigen::VectorXd& x_curr, const Eigen::VectorXd& u, const double dt);
 
-    double vehicle_constraint(const std::vector<double>& x, std::vector<double>& grad, void* data);
+    static double x_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
+    static double y_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
+    static double v_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
+    static double yaw_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
+    static double test_constraint(const std::vector<double>& x, std::vector<double>& grad, void* vehicle_data);
 
     int getDimX(){return dim_x_;}
     int getDimU(){return dim_u_;}

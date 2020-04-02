@@ -15,7 +15,7 @@ void RefGenerator::generate(const Eigen::VectorXd& x0,
     x_ref.front() = x0;
     for(int i=0; i<u_ref.size(); ++i)
     {
-        u_ref[i](0) = 0.1;
+        u_ref[i](0) = 0.01;
         u_ref[i](1) = 0.003;
     }
 

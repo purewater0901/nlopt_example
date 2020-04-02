@@ -9,6 +9,7 @@
 #include <memory>
 #include <iomanip>
 #include <Eigen/Eigen>
+#include <chrono>
 #include "nmpc_utils.h"
 #include "nmpc/vehicle_model.h"
 

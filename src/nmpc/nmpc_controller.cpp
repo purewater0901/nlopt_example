@@ -11,7 +11,9 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     int dim_u = u_ref.front().size();
     int horizon = x_ref.size();
     int dim_xu = dim_x*horizon+dim_u*(horizon-1);
+    double wheel_length = 4.0;
     double steer_lim = M_PI * (45.0/180.0);
+    double curvature_lim = std::tan(steer_lim)/wheel_length;
     double a_lim = 1.0;
 
     nlopt::opt opt(nlopt::LD_SLSQP, dim_xu);
@@ -25,15 +27,15 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
         ub[i*dim_x] =  HUGE_VAL;
         lb[i*dim_x+1] = -HUGE_VAL;
         ub[i*dim_x+1] =  HUGE_VAL;
-        lb[i*dim_x+2] =  0.0;
-        ub[i*dim_x+2] =  2.2;
+        lb[i*dim_x+2] =  -HUGE_VAL;
+        ub[i*dim_x+2] =  HUGE_VAL;
         lb[i*dim_x+3] = -HUGE_VAL;
         ub[i*dim_x+3] =  HUGE_VAL;
     }
     for(int i=dim_x*horizon; i<dim_xu; i+=dim_u)
     {
-        lb[i] = -steer_lim;
-        ub[i] =  steer_lim;
+        lb[i] = -curvature_lim;
+        ub[i] =  curvature_lim;
         lb[i+1] = -a_lim;
         ub[i+1] =  a_lim;
     }
@@ -73,6 +75,12 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     opt.set_min_objective(this->objective_function, &data);
 
     //3. add constraints
+    VehicleDynamicsData vehicle_data;
+    vehicle_data.horizon_ = horizon;
+    vehicle_data.dt_ = dt;
+    vehicle_data.dim_x_ = dim_x;
+    vehicle_data.dim_u_ = dim_u;
+    opt.add_equality_constraint(VehicleModel::test_constraint, &vehicle_data, 1e-8);
 
     //3.set x tolerance
     opt.set_xtol_rel(x_tolerance_);
@@ -96,14 +104,21 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     try
     {
         //solve the problem
+        std::chrono::system_clock::time_point start, end;
+        start = std::chrono::system_clock::now();
+
         nlopt::result result = opt.optimize(x, min_f);
+
+        end = std::chrono::system_clock::now();
+        double time = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0);
+        std::cout << "Calculation time: " << time << "[ms]" << std::endl;
 
         std::cout << "nlopt success" << std::endl;
         std::cout << "Minimum Value: " << min_f << std::endl;
         std::cout << "x size: " << x.size() << std::endl;
         for(int i=0; i<horizon; i++)
         {
-            std::cout << "x:     " << x[i*dim_x]   - x_ref[i](0) << std::endl;
+            std::cout << "x:     " << x[i*dim_x] << " " << x_ref[i](0) << std::endl;
             std::cout << "y:     " << x[i*dim_x+1] - x_ref[i](1) << std::endl;
             std::cout << "v:     " << x[i*dim_x+2] << " " <<  x_ref[i](2) << std::endl;
             std::cout << "yaw:   " << x[i*dim_x+3] - x_ref[i](3) << std::endl;
