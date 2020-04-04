@@ -18,7 +18,7 @@ Eigen::VectorXd VehicleModel::calcNextState(const Eigen::VectorXd &x_curr,
     double lon_acc = u(0);
     double curvature = u(1);
 
-    double l = lon_velocity * dt + 1.0/2.0*dt*dt*lon_acc;
+    double l = lon_velocity * dt + 0.5*dt*dt*lon_acc;
     double yaw_next = NMPCUtils::normalizeRadian(yaw_curr + curvature*l);
     if(std::fabs(curvature)>1e-6)
     {
@@ -36,197 +36,114 @@ Eigen::VectorXd VehicleModel::calcNextState(const Eigen::VectorXd &x_curr,
     return x_next;
 }
 
-double VehicleModel::x_constraint(const std::vector<double> &x,
-                                  std::vector<double> &grad,
-                                  void *vehicle_data)
+void VehicleModel::DynamicEquationConstraint(unsigned m,
+                                             double* result,
+                                             unsigned n,
+                                             const double* x,
+                                             double* grad,
+                                             void* f_data)
 {
-    VehicleDynamicsData* data= reinterpret_cast<VehicleDynamicsData*>(vehicle_data);
-    int dim_x = data->dim_x_;
-    int state_id = data->state_id_;
-    int input_id = data->input_id_;
-    double dt = data->dt_;
-
-    double x_k     = x[state_id];
-    double x_k_1   = x[state_id+dim_x];
-    double v_k     = x[state_id+2];
-    double yaw_k   = x[state_id+3];
-    double yaw_k_1 = x[state_id+dim_x+3];
-    double u_a = x[input_id];
-    double u_k = x[input_id+1];
-    double l = v_k * dt + 0.5*dt*dt*u_a;
-
-    double dx;
-    if(std::fabs(u_k)>1e-6)
-        dx = x_k_1 - (x_k + (std::sin(yaw_k_1) - std::sin(yaw_k))/u_k);
-    else
-        dx = x_k_1 - (x_k + l * std::cos(yaw_k));
-
-    if(!grad.empty())
-    {
-        if(std::fabs(u_k)>1e-6)
-        {
-            grad[state_id]         += -1.0;
-            grad[state_id+3]       +=  (1.0/u_k)*std::cos(yaw_k);
-            grad[state_id+dim_x]   +=  1.0;
-            grad[state_id+dim_x+3] += -(1.0/u_k)*std::cos(yaw_k_1);
-            grad[input_id+1]       += (std::sin(yaw_k_1) - std::sin(yaw_k))/(u_k * u_k);
-        }
-        else
-        {
-            grad[state_id]        += -1.0;
-            grad[state_id+2]      += -dt * std::cos(yaw_k);
-            grad[state_id+3]      +=  l * std::sin(yaw_k);
-            grad[state_id+dim_x]  +=  1.0;
-            grad[input_id]        += -0.5*dt*dt*std::cos(yaw_k);
-        }
-    }
-
-    return dx;
-}
-
-double VehicleModel::y_constraint(const std::vector<double> &x,
-                                  std::vector<double> &grad,
-                                  void *vehicle_data)
-{
-    VehicleDynamicsData* data= reinterpret_cast<VehicleDynamicsData*>(vehicle_data);
-    int dim_x = data->dim_x_;
-    int state_id = data->state_id_;
-    int input_id = data->input_id_;
-    double dt = data->dt_;
-
-    double y_k     = x[state_id+1];
-    double y_k_1   = x[state_id+dim_x+1];
-    double v_k     = x[state_id+2];
-    double yaw_k   = x[state_id+3];
-    double yaw_k_1 = x[state_id+dim_x+3];
-    double u_a = x[input_id];
-    double u_k = x[input_id+1];
-    double l = v_k * dt + 1.0/2.0*dt*dt*u_a;
-
-    double dy;
-    if(std::fabs(u_k)>1e-6)
-        dy = y_k_1 - (y_k + (std::cos(yaw_k) - std::cos(yaw_k_1))/u_k);
-    else
-        dy = y_k_1 - (y_k + l * std::sin(yaw_k));
-
-    if(!grad.empty())
-    {
-        if(std::fabs(u_k)>1e-6)
-        {
-            grad[state_id+1]        += -1.0;
-            grad[state_id+3]        += (1.0/u_k)*std::sin(yaw_k);
-            grad[state_id+dim_x+1]  +=  1.0;
-            grad[state_id+dim_x+3]  +=  -(1.0/u_k)*std::sin(yaw_k_1);
-            grad[input_id+1]        += (std::cos(yaw_k) - std::cos(yaw_k_1))/(u_k * u_k);
-        }
-        else
-        {
-            grad[state_id+1]        += -1.0;
-            grad[state_id+2]        += -dt * std::sin(yaw_k);
-            grad[state_id+3]        +=  -l * std::cos(yaw_k);
-            grad[state_id+dim_x+1]  +=  1.0;
-            grad[input_id]          += -0.5*dt*dt*std::sin(yaw_k);
-        }
-    }
-
-    return dy;
-}
-
-double VehicleModel::v_constraint(const std::vector<double> &x,
-                                  std::vector<double> &grad,
-                                  void *vehicle_data)
-{
-    VehicleDynamicsData* data= reinterpret_cast<VehicleDynamicsData*>(vehicle_data);
+    VehicleDynamicsData* data= reinterpret_cast<VehicleDynamicsData*>(f_data);
     int horizon = data->horizon_;
-    int dim_x = data->dim_x_;
-    int dim_u = data->dim_u_;
-    double dt = data->dt_;
+    int dim_x   = data->dim_x_;
+    int dim_u   = data->dim_u_;
+    int dim_xu_s = dim_x*horizon + dim_u*(horizon-1);
+    double dt   = data->dt_;
 
-    double a = 0.0;
-    for(int i=0; i<horizon; ++i)
-        a += x[horizon*dim_x + i*dim_u];
+    assert(m == dim_x*(horizon-1));
+    assert(n == dim_xu_s);
 
-    if(!grad.empty())
-    {
-        grad[2] += -1.0;
-        grad[(horizon-1)*dim_x+2] += 1.0;
-        for(int i=0; i<horizon-1; ++i)
-            grad[(horizon*dim_x + i*dim_u)] += -dt;
-    }
-
-    return x[(horizon-1)*dim_x+2] - x[2] - a*dt;
-}
-
-double VehicleModel::yaw_constraint(const std::vector<double> &x,
-                                  std::vector<double> &grad,
-                                  void *vehicle_data)
-{
-    VehicleDynamicsData* data= reinterpret_cast<VehicleDynamicsData*>(vehicle_data);
-    int horizon = data->horizon_;
-    int dim_x = data->dim_x_;
-    int dim_u = data->dim_u_;
-    double dt = data->dt_;
-
-    if(!grad.empty())
-    {
-        grad[3] += -1.0;
-        grad[(horizon-1)*dim_x+3] += 1.0;
-    }
-
-    double lk = 0.0;
     for(int i=0; i<horizon-1; ++i)
     {
-        double u_a = x[horizon*dim_x + i*dim_u];
-        double u_k = x[horizon*dim_x + i*dim_u + 1];
-        double l =  x[i*dim_x+2]*dt + 1.0/2.0*dt*dt*u_a;
-        lk += l*u_k;
+        std::vector<double> x_next(dim_x, 0.0);
+        double lon_velocity = x[i*dim_x+2];
+        double yaw_curr     = x[i*dim_x+3];
+        double lon_acc      = x[dim_x*horizon+i*dim_u];
+        double curvature    = x[dim_x*horizon+i*dim_u+1];
+        double l            = lon_velocity*dt + 0.5*dt*dt*lon_acc;
+        double yaw_next     = yaw_curr + curvature*l;
 
-        if(!grad.empty())
+        if(std::fabs(curvature)>1e-6)
         {
-            grad[i*dim_x + 2] += -u_k*dt;
-            grad[horizon*dim_x + i*dim_u] += -0.5*dt*dt*u_k;
-            grad[horizon*dim_x + i*dim_u + 1] += -l;
+            x_next[0] = x[i*dim_x]   + (std::sin(yaw_next) - std::sin(yaw_curr))/curvature;
+            x_next[1] = x[i*dim_x+1] + (std::cos(yaw_curr) - std::cos(yaw_next))/curvature;
+        }
+        else
+        {
+            x_next[0] = x[i*dim_x]   + l * std::cos(yaw_curr);
+            x_next[1] = x[i*dim_x+1] + l * std::sin(yaw_curr);
+        }
+        x_next[2] = lon_velocity + lon_acc * dt;
+        x_next[3] = yaw_next;
+
+        result[i*dim_x]   = x[(i+1)*dim_x]   - x_next[0];
+        result[i*dim_x+1] = x[(i+1)*dim_x+1] - x_next[1];
+        result[i*dim_x+2] = x[(i+1)*dim_x+2] - x_next[2];
+        result[i*dim_x+3] = x[(i+1)*dim_x+3] - x_next[3];
+        /*
+        result[i*3]   = x[(i+1)*dim_x]   - x_next[0];
+        result[i*3+1] = x[(i+1)*dim_x+2] - x_next[2];
+        result[i*3+2] = x[(i+1)*dim_x+3] - x_next[3];
+         */
+
+        if(grad)
+        {
+            int id_x   = (i*dim_x)  *dim_xu_s;
+            int id_y   = (i*dim_x+1)*dim_xu_s;
+            int id_v   = (i*dim_x+2)*dim_xu_s;
+            int id_yaw = (i*dim_x+3)*dim_xu_s;
+
+            if(std::fabs(curvature)>1e-6)
+            {
+                //gradient for x
+                grad[id_x+i*dim_x]       = -1.0; // dc/d(x_curr)
+                grad[id_x+i*dim_x+2]     = -dt*std::cos(yaw_next); // dc/d(v_curr)
+                grad[id_x+i*dim_x+3]     =  (1.0/curvature)*std::cos(yaw_curr); // dc/d(yaw_curr)
+                grad[id_x+(i+1)*dim_x]   =  1.0; // dc/d(x_next)
+                grad[id_x+(i+1)*dim_x+3] = -(1.0/curvature)*std::cos(yaw_next); // dc/d(yaw_next)
+                grad[id_x+horizon*dim_x+i*dim_u]   = -0.5*dt*dt*std::cos(yaw_next); // dc/d(u_a)
+                grad[id_x+horizon*dim_x+i*dim_u+1] = (-curvature*l*std::cos(yaw_next)+std::sin(yaw_next)-std::sin(yaw_curr))/(curvature*curvature); // dc/d(u_k)
+
+                //gradient for y
+                grad[id_y+i*dim_x+1]     = -1.0; // dc/d(y_curr)
+                grad[id_y+i*dim_x+2]     = -dt*std::sin(yaw_next); // dc/d(v_curr)
+                grad[id_y+i*dim_x+3]     = (1.0/curvature)*std::sin(yaw_curr); // dc/d(y_curr)
+                grad[id_y+(i+1)*dim_x+1] =  1.0; // dc/d(y_next)
+                grad[id_y+(i+1)*dim_x+3] = -(1.0/curvature)*std::sin(yaw_next); // dc/d(y_next)
+                grad[id_y+horizon*dim_x+i*dim_u]   = -0.5*dt*dt*std::sin(yaw_next); // dc/d(u_a)
+                grad[id_y+horizon*dim_x+i*dim_u+1] = (-curvature*l*std::sin(yaw_next)+ std::cos(yaw_curr) - std::cos(yaw_next))/(curvature*curvature); // dc/d(u_k)
+            }
+            else
+            {
+                //gradient for x
+                grad[id_x+i*dim_x]       = -1.0; // dc/d(x_curr)
+                grad[id_x+i*dim_x+2]     = -dt*std::cos(yaw_curr); // dc/d(x_curr)
+                grad[id_x+i*dim_x+3]     =   l*std::sin(yaw_curr); // dc/d(x_curr)
+                grad[id_x+(i+1)*dim_x]   =  1.0; // dc/d(x_next)
+                grad[id_x+horizon*dim_x+i*dim_u] = -0.5*dt*dt*std::cos(yaw_curr); // dc/d(x_next)
+
+                //gradient for y
+                grad[id_y+i*dim_x+1]     = -1.0; // dc/d(y_curr)
+                grad[id_y+i*dim_x+2]     = -dt*std::sin(yaw_curr); // dc/d(v_curr)
+                grad[id_y+i*dim_x+3]     =  -l*std::cos(yaw_curr); // dc/d(yaw_curr)
+                grad[id_y+(i+1)*dim_x+1] =  1.0; // dc/d(y_next)
+                grad[id_y+horizon*dim_x+i*dim_u] = -0.5*dt*dt*std::sin(yaw_curr); // dc/d(u_a)
+            }
+
+            //gradient for v
+            grad[id_v+i*dim_x+2]             = -1.0;
+            grad[id_v+(i+1)*dim_x+2]         =  1.0;
+            grad[id_v+horizon*dim_x+i*dim_u] =  -dt;
+
+            //gradient for yaw
+            grad[id_yaw+i*dim_x+2]               = -curvature*dt;
+            grad[id_yaw+i*dim_x+3]               = -1.0;
+            grad[id_yaw+(i+1)*dim_x+3]           =  1.0;
+            grad[id_yaw+horizon*dim_x+i*dim_u]   =  -0.5*dt*dt*curvature;
+            grad[id_yaw+horizon*dim_x+i*dim_u+1] =  -l;
         }
     }
-
-    double result = x[(horizon-1)*dim_x+3] - x[3] - lk;
-    return NMPCUtils::normalizeRadian(result);
 }
-
-double VehicleModel::test_constraint(const std::vector<double>& x, std::vector<double>& grad, void* vehicle_data)
-{
-    VehicleDynamicsData* data= reinterpret_cast<VehicleDynamicsData*>(vehicle_data);
-
-    for(int i=0; i<grad.size(); ++i)
-        grad[i] = 0.0;
-
-    double dh = 0.0;
-    /*
-    for(int i=0; i<data->horizon_; ++i)
-    {
-        VehicleDynamicsData new_data;
-        new_data.horizon_ = data->horizon_;
-        new_data.dt_ = data->dt_;
-        new_data.dim_x_ = data->dim_x_;
-        new_data.dim_u_ = data->dim_u_;
-        new_data.state_id_ = i*data->dim_x_;
-        new_data.input_id_ = data->horizon_*data->dim_x_+ i*data->dim_u_;
-
-        //dh += x_constraint(x, grad, &new_data);
-        //dh += y_constraint(x, grad, &new_data);
-    }
-     */
-    VehicleDynamicsData new_data;
-    new_data.horizon_ = data->horizon_;
-    new_data.dt_ = data->dt_;
-    new_data.dim_x_ = data->dim_x_;
-    new_data.dim_u_ = data->dim_u_;
-    dh += v_constraint(x, grad, &new_data);
-    dh += yaw_constraint(x, grad, &new_data);
-
-    return dh;
-}
-
 
 
 

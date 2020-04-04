@@ -37,7 +37,9 @@ typedef struct
 class NMPCController
 {
 public:
-    NMPCController(const double x_tolerance) : x_tolerance_(x_tolerance) {};
+    NMPCController(const double x_tolerance,
+                   const double equality_tolerance) : x_tolerance_(x_tolerance),
+                                                      equality_tolerance_(equality_tolerance) {};
 
     bool calculateOptimalCommand(const VecOfVecXd& x_ref,
                                  const VecOfVecXd& u_ref,
@@ -50,6 +52,7 @@ public:
                                      void* my_func_data);
 private:
     double x_tolerance_;
+    double equality_tolerance_;
 };
 
 #endif //PRC_NLOPT_NMPC_CONTROLLER_H

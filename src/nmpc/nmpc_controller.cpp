@@ -10,17 +10,18 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     int dim_x = x_ref.front().size();
     int dim_u = u_ref.front().size();
     int horizon = x_ref.size();
-    int dim_xu = dim_x*horizon+dim_u*(horizon-1);
+    int dim_xu_s = dim_x*horizon+dim_u*(horizon-1);
     double wheel_length = 4.0;
     double steer_lim = M_PI * (45.0/180.0);
     double curvature_lim = std::tan(steer_lim)/wheel_length;
     double a_lim = 1.0;
 
-    nlopt::opt opt(nlopt::LD_SLSQP, dim_xu);
+    //nlopt::opt opt(nlopt::LN_COBYLA, dim_xu_s);
+    nlopt::opt opt(nlopt::LD_SLSQP, dim_xu_s);
 
     //1. create input constraint
-    std::vector<double> lb(dim_xu);
-    std::vector<double> ub(dim_xu);
+    std::vector<double> lb(dim_xu_s);
+    std::vector<double> ub(dim_xu_s);
     for(int i=0; i<horizon; ++i)
     {
         lb[i*dim_x] = -HUGE_VAL;
@@ -32,12 +33,12 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
         lb[i*dim_x+3] = -HUGE_VAL;
         ub[i*dim_x+3] =  HUGE_VAL;
     }
-    for(int i=dim_x*horizon; i<dim_xu; i+=dim_u)
+    for(int i=dim_x*horizon; i<dim_xu_s; i+=dim_u)
     {
-        lb[i] = -curvature_lim;
-        ub[i] =  curvature_lim;
-        lb[i+1] = -a_lim;
-        ub[i+1] =  a_lim;
+        lb[i] = -a_lim;
+        ub[i] =  a_lim;
+        lb[i+1] = -curvature_lim;
+        ub[i+1] =  curvature_lim;
     }
     opt.set_lower_bounds(lb);
     opt.set_upper_bounds(ub);
@@ -60,8 +61,8 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     Q(1,1) = 10.0;
     Q(2,2) = 1.0;
     Q(3,3) = 10.0;
-    R(0,0) = 0.1;
-    R(1,1) = 0.1;
+    R(0,0) = 1.0;
+    R(1,1) = 10.0;
     Weight W;
     W.Q_ = Q;
     W.R_ = R;
@@ -80,18 +81,19 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     vehicle_data.dt_ = dt;
     vehicle_data.dim_x_ = dim_x;
     vehicle_data.dim_u_ = dim_u;
-    opt.add_equality_constraint(VehicleModel::test_constraint, &vehicle_data, 1e-8);
+    std::vector<double> tol_vehcicle_velocity(dim_x*(horizon-1), equality_tolerance_);
+    opt.add_equality_mconstraint(VehicleModel::DynamicEquationConstraint, &vehicle_data, tol_vehcicle_velocity);
 
-    //3.set x tolerance
+    //4.set x tolerance
     opt.set_xtol_rel(x_tolerance_);
 
-    //4. set initial value
+    //5. set initial value
     VecOfVecXd  u_ini = std::vector<Eigen::VectorXd>(horizon-1, Eigen::VectorXd::Zero(dim_u));
     VecOfVecXd  x_ini = std::vector<Eigen::VectorXd>(horizon, Eigen::VectorXd::Zero(dim_x));
     x_ini.front() = x_ref.front();
     for(int i=0; i<horizon-1; ++i)
         x_ini[i+1] = vehicle_ptr->calcNextState(x_ini[i], u_ini[i], dt);
-    std::vector<double> x(dim_xu);
+    std::vector<double> x(dim_xu_s);
     for(int i=0; i<horizon; i++)
         for(int j=0; j<dim_x; ++j)
             x[i*dim_x+j] = x_ini[i](j);
@@ -99,7 +101,7 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
         for(int j=0; j<dim_u; ++j)
             x[horizon*dim_x+i*dim_u+j] = u_ini[i](j);
 
-    //5. solve the problem
+    //6. solve the problem
     double min_f;
     try
     {
@@ -121,7 +123,13 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
             std::cout << "x:     " << x[i*dim_x] << " " << x_ref[i](0) << std::endl;
             std::cout << "y:     " << x[i*dim_x+1] - x_ref[i](1) << std::endl;
             std::cout << "v:     " << x[i*dim_x+2] << " " <<  x_ref[i](2) << std::endl;
-            std::cout << "yaw:   " << x[i*dim_x+3] - x_ref[i](3) << std::endl;
+            std::cout << "yaw:   " << x[i*dim_x+3] << " " <<  x_ref[i](3) << std::endl;
+        }
+
+        for(int i=0; i<horizon-1; ++i)
+        {
+            std::cout << "u_a: " << x[horizon*dim_x+i*dim_u] << std::endl;
+            std::cout << "u_k: " << x[horizon*dim_x+i*dim_u+1] << std::endl;
         }
 
         optimal_command.resize(horizon-1);

@@ -24,11 +24,7 @@ public:
 
     Eigen::VectorXd calcNextState(const Eigen::VectorXd& x_curr, const Eigen::VectorXd& u, const double dt);
 
-    static double x_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
-    static double y_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
-    static double v_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
-    static double yaw_constraint(const std::vector<double>&x, std::vector<double>& grad, void* vehicle_data);
-    static double test_constraint(const std::vector<double>& x, std::vector<double>& grad, void* vehicle_data);
+    static void DynamicEquationConstraint(unsigned m, double* result, unsigned n, const double* x, double* grad, void* f_data);
 
     int getDimX(){return dim_x_;}
     int getDimU(){return dim_u_;}

@@ -9,10 +9,11 @@ int main(int argc, char** argv)
     int dim_u = 2;
     int horizon = 30;
     double dt = 0.3;
-    double x_tolerance = 1e-3;
+    double x_tolerance = 1e-5;
+    double equality_tolerance = 1e-4;
 
     RefGenerator ref_generator;
-    NMPCController controller(x_tolerance);
+    NMPCController controller(x_tolerance, equality_tolerance);
     std::shared_ptr<VehicleModel> vehicle_ptr = std::make_shared<VehicleModel>(dim_x, dim_u);
 
     Eigen::VectorXd x0 = Eigen::VectorXd::Zero(dim_x);
