@@ -50,8 +50,8 @@ void VehicleModel::DynamicEquationConstraint(unsigned m,
     int dim_xu_s = dim_x*horizon + dim_u*(horizon-1);
     double dt   = data->dt_;
 
-    assert(m == dim_x*(horizon-1));
-    assert(n == dim_xu_s);
+    //assert(m == dim_x*(horizon-1));
+    //assert(n == dim_xu_s);
 
     for(int i=0; i<horizon-1; ++i)
     {
@@ -82,8 +82,8 @@ void VehicleModel::DynamicEquationConstraint(unsigned m,
         result[i*dim_x+3] = x[(i+1)*dim_x+3] - x_next[3];
         /*
         result[i*3]   = x[(i+1)*dim_x]   - x_next[0];
-        result[i*3+1] = x[(i+1)*dim_x+2] - x_next[2];
-        result[i*3+2] = x[(i+1)*dim_x+3] - x_next[3];
+        result[i*3+1] = x[(i+1)*dim_x+1] - x_next[1];
+        result[i*3+2] = x[(i+1)*dim_x+2] - x_next[2];
          */
 
         if(grad)
@@ -92,6 +92,11 @@ void VehicleModel::DynamicEquationConstraint(unsigned m,
             int id_y   = (i*dim_x+1)*dim_xu_s;
             int id_v   = (i*dim_x+2)*dim_xu_s;
             int id_yaw = (i*dim_x+3)*dim_xu_s;
+            /*
+            int id_x   = (i*3)  *dim_xu_s;
+            int id_y   = (i*3+1)*dim_xu_s;
+            int id_v   = (i*3+2)*dim_xu_s;
+             */
 
             if(std::fabs(curvature)>1e-6)
             {
@@ -139,8 +144,8 @@ void VehicleModel::DynamicEquationConstraint(unsigned m,
             grad[id_yaw+i*dim_x+2]               = -curvature*dt;
             grad[id_yaw+i*dim_x+3]               = -1.0;
             grad[id_yaw+(i+1)*dim_x+3]           =  1.0;
-            grad[id_yaw+horizon*dim_x+i*dim_u]   =  -0.5*dt*dt*curvature;
-            grad[id_yaw+horizon*dim_x+i*dim_u+1] =  -l;
+            grad[id_yaw+horizon*dim_x+i*dim_u]   = -0.5*dt*dt*curvature;
+            grad[id_yaw+horizon*dim_x+i*dim_u+1] = -l;
         }
     }
 }

@@ -12,6 +12,7 @@
 #include <chrono>
 #include "nmpc_utils.h"
 #include "nmpc/vehicle_model.h"
+#include "nmpc/obstacle.h"
 
 typedef struct
 {
@@ -34,12 +35,23 @@ typedef struct
     int horizon_;
 }ObjectiveData;
 
+typedef struct
+{
+    Obstacle obstacle_;
+    int dim_x_;
+    int dim_u_;
+    int horizon_;
+    double dt_;
+}ObsAvoidData;
+
 class NMPCController
 {
 public:
     NMPCController(const double x_tolerance,
-                   const double equality_tolerance) : x_tolerance_(x_tolerance),
-                                                      equality_tolerance_(equality_tolerance) {};
+                   const double equality_tolerance,
+                   const double inequality_tolerance) : x_tolerance_(x_tolerance),
+                                                        equality_tolerance_(equality_tolerance),
+                                                        inequality_tolerance_(inequality_tolerance){};
 
     bool calculateOptimalCommand(const VecOfVecXd& x_ref,
                                  const VecOfVecXd& u_ref,
@@ -47,12 +59,21 @@ public:
                                  const double dt,
                                  VecOfVecXd& optimal_command);
 
-    static double objective_function(const std::vector<double>& x_vec,
-                                     std::vector<double>& grad,
-                                     void* my_func_data);
+    static double objective_function(unsigned n,
+                                     const double* x,
+                                     double *grad,
+                                     void* objective_data);
+
+    static void obstacle_constraint(unsigned m,
+                                    double* result,
+                                    unsigned n,
+                                    const double* x,
+                                    double* grad,
+                                    void* f_data);
 private:
     double x_tolerance_;
     double equality_tolerance_;
+    double inequality_tolerance_;
 };
 
 #endif //PRC_NLOPT_NMPC_CONTROLLER_H

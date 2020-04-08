@@ -59,7 +59,7 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     Eigen::MatrixXd R = Eigen::MatrixXd::Zero(dim_u, dim_u);
     Q(0,0) = 10.0;
     Q(1,1) = 10.0;
-    Q(2,2) = 1.0;
+    Q(2,2) = 10.0;
     Q(3,3) = 10.0;
     R(0,0) = 1.0;
     R(1,1) = 10.0;
@@ -76,13 +76,25 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     opt.set_min_objective(this->objective_function, &data);
 
     //3. add constraints
+    //equality constraints
     VehicleDynamicsData vehicle_data;
     vehicle_data.horizon_ = horizon;
     vehicle_data.dt_ = dt;
     vehicle_data.dim_x_ = dim_x;
     vehicle_data.dim_u_ = dim_u;
-    std::vector<double> tol_vehcicle_velocity(dim_x*(horizon-1), equality_tolerance_);
-    opt.add_equality_mconstraint(VehicleModel::DynamicEquationConstraint, &vehicle_data, tol_vehcicle_velocity);
+    std::vector<double> tol_vehicle_equality(dim_x*(horizon-1), equality_tolerance_);
+    opt.add_equality_mconstraint(VehicleModel::DynamicEquationConstraint, &vehicle_data, tol_vehicle_equality);
+
+    //inequality constraints(obstacle avoidance)
+    Obstacle obs(10, 0, 1);
+    ObsAvoidData obs_constrain_data;
+    obs_constrain_data.dim_x_   = dim_x;
+    obs_constrain_data.dim_u_   = dim_u;
+    obs_constrain_data.horizon_ = horizon;
+    obs_constrain_data.dt_ = dt;
+    std::vector<double> tol_obstacle_avoidance(horizon, inequality_tolerance_);
+    opt.add_inequality_mconstraint(this->obstacle_constraint, &obs_constrain_data, tol_obstacle_avoidance);
+
 
     //4.set x tolerance
     opt.set_xtol_rel(x_tolerance_);
@@ -117,13 +129,12 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
 
         std::cout << "nlopt success" << std::endl;
         std::cout << "Minimum Value: " << min_f << std::endl;
-        std::cout << "x size: " << x.size() << std::endl;
         for(int i=0; i<horizon; i++)
         {
-            std::cout << "x:     " << x[i*dim_x] << " " << x_ref[i](0) << std::endl;
-            std::cout << "y:     " << x[i*dim_x+1] - x_ref[i](1) << std::endl;
-            std::cout << "v:     " << x[i*dim_x+2] << " " <<  x_ref[i](2) << std::endl;
-            std::cout << "yaw:   " << x[i*dim_x+3] << " " <<  x_ref[i](3) << std::endl;
+            std::cout << "x:     " << x[i*dim_x]   << " " << x_ref[i](0) << std::endl;
+            std::cout << "y:     " << x[i*dim_x+1] << " " << x_ref[i](1) << std::endl;
+            std::cout << "v:     " << x[i*dim_x+2] << " " << x_ref[i](2) << std::endl;
+            std::cout << "yaw:   " << x[i*dim_x+3] << " " << x_ref[i](3) << std::endl;
         }
 
         for(int i=0; i<horizon-1; ++i)
@@ -150,11 +161,12 @@ bool NMPCController::calculateOptimalCommand(const VecOfVecXd& x_ref,
     }
 }
 
-double NMPCController::objective_function(const std::vector<double>& x_vec,
-                                          std::vector<double> &grad,
-                                          void *my_func_data)
+double NMPCController::objective_function(unsigned n,
+                                          const double* x_vec,
+                                          double *grad,
+                                          void* objective_data)
 {
-    ObjectiveData* data= reinterpret_cast<ObjectiveData*>(my_func_data);
+    ObjectiveData* data= reinterpret_cast<ObjectiveData*>(objective_data);
     int horizon = data->horizon_;
     int dim_x = data->dim_x_;
     int dim_u = data->dim_u_;
@@ -165,7 +177,7 @@ double NMPCController::objective_function(const std::vector<double>& x_vec,
     for(int i=0; i<horizon-1; ++i)
         R.block(i*dim_u, i*dim_u, dim_u, dim_u) = data->weight_.R_;
 
-    assert(x_vec.size() == dim_x * horizon +dim_u*(horizon-1));
+    assert(n == dim_x * horizon +dim_u*(horizon-1));
 
     Eigen::VectorXd x_ref = data->ref_.x_ref_;
     Eigen::VectorXd u_ref = data->ref_.u_ref_;
@@ -176,17 +188,88 @@ double NMPCController::objective_function(const std::vector<double>& x_vec,
     for(int i=0; i<du.size(); ++i)
         du(i) = x_vec[i+dim_x*horizon] - u_ref(i);
 
-    if(!grad.empty())
-    {
-        assert(grad.size() == dim_x*horizon+dim_u*(horizon-1));
-        Eigen::VectorXd x_dot = Q*dx;
-        Eigen::VectorXd u_dot = R*du;
+    Eigen::VectorXd qdx = Q*dx;
+    Eigen::VectorXd rdu = R*du;
 
-        for(int i=0; i<x_dot.size(); ++i)
-            grad[i] = x_dot(i);
-        for(int i=0; i<u_dot.size(); ++i)
-            grad[i+x_dot.size()] = u_dot(i);
+    if(grad)
+    {
+        assert(n == dim_x*horizon+dim_u*(horizon-1));
+        assert(n == qdx.size()+rdu.size());
+
+        for(int i=0; i<qdx.size(); ++i)
+            grad[i] = qdx(i);
+        for(int i=0; i<rdu.size(); ++i)
+            grad[i+horizon*dim_x] = rdu(i);
     }
 
-    return 0.5*dx.transpose().dot(Q*dx) + 0.5*du.transpose().dot(R*du);
+    return 0.5*dx.transpose().dot(qdx) + 0.5*du.transpose().dot(rdu);
+}
+
+void NMPCController::obstacle_constraint(unsigned m,
+                                         double* result,
+                                         unsigned n,
+                                         const double* x_vec,
+                                         double* grad,
+                                         void* obstacle_data)
+{
+    ObsAvoidData* data= reinterpret_cast<ObsAvoidData*>(obstacle_data);
+
+    double obs_x = data->obstacle_.x_;
+    double obs_y = data->obstacle_.y_;
+    double obs_r = data->obstacle_.radius_;
+    int dim_x   = data->dim_x_;
+    int dim_u   = data->dim_u_;
+    int horizon = data->horizon_;
+    double dt   = data->dt_;
+    int dim_xu_s = dim_x*horizon+dim_u*(horizon-1);
+
+    assert(m==horizon);
+
+    for(int i=0; i<horizon; ++i)
+    {
+        double ego_r = 3.0;
+        double ego_x = x_vec[i*dim_x];
+        double ego_y = x_vec[i*dim_x+1];
+        double dx = ego_x-obs_x;
+        double dy = ego_y-obs_y;
+
+        if(grad)
+        {
+            int id = i*dim_xu_s;
+            grad[id+i*dim_x]   = -2*dx;
+            grad[id+i*dim_x+1] = -2*dy;
+
+            if(i>0)
+            {
+                double u_a = x_vec[horizon*dim_x+(i-1)*dim_u];
+                double u_k = x_vec[horizon*dim_x+(i-1)*dim_u+1];
+                double yaw_curr = x_vec[(i-1)*dim_x+3];
+                double yaw_next = x_vec[i*dim_x+3];
+                double lon_velocity = x_vec[(i-1)*dim_x+2];
+                double l = lon_velocity*dt + 0.5*dt*dt*u_a;
+
+                if(u_k>1e-6)
+                {
+                    grad[id+(i-1)*dim_x]   = -2*dx; // dc/d(x_curr)
+                    grad[id+(i-1)*dim_x+1] = -2*dy; // dc/d(x_curr)
+                    grad[id+(i-1)*dim_x+2] = -2*dx*(-dt*std::cos(yaw_next)) - 2*dy*(-dt*std::sin(yaw_next)); // dc/d(v_curr)
+                    grad[id+(i-1)*dim_x+3] = -2*dx*(1.0/u_k)*std::cos(yaw_curr) - 2*dy*(1.0/u_k)*std::sin(yaw_curr); // dc/d(yaw_curr)
+                    grad[id+i*dim_x+3]     = -2*dx*(-(1.0/u_k)*std::cos(yaw_next)) -2*dy*(-(1.0/u_k)*std::sin(yaw_next)); // dc/d(yaw_next)
+                    grad[id+horizon*dim_x+(i-1)*dim_u]   = -2*dx*(-0.5*dt*dt*std::cos(yaw_next)) - 2*dy*(-0.5*dt*dt*std::sin(yaw_next)); // dc/d(u_a)
+                    grad[id+horizon*dim_x+(i-1)*dim_u+1] = -2*dx*(-u_k*l*std::cos(yaw_next)+std::sin(yaw_next)-std::sin(yaw_curr))/(u_k*u_k)
+                                                           -2*dy*(-u_k*l*std::sin(yaw_next)+std::cos(yaw_curr)-std::cos(yaw_next))/(u_k*u_k); // dc/d(u_k)
+                }
+                else
+                {
+                    grad[id+(i-1)*dim_x]   = -2*dx; // dc/d(x_curr)
+                    grad[id+(i-1)*dim_x+1] = -2*dy; // dc/d(y_curr)
+                    grad[id+(i-1)*dim_x+2] = -2*dx*(-dt*std::cos(yaw_curr)) - 2*dy*(-dt*std::sin(yaw_curr)); // dc/d(v_curr)
+                    grad[id+(i-1)*dim_x+3] = -2*dx*(l*std::sin(yaw_curr))   - 2*dy*(-l*std::cos(yaw_curr)); // dc/d(yaw_curr)
+                    grad[id+horizon*dim_x+(i-1)*dim_u] = -2*dx*(-0.5*dt*dt*std::cos(yaw_curr))-2*dy*(-0.5*dt*dt*std::sin(yaw_curr)); // dc/d(x_next)
+                }
+            }
+        }
+
+        result[i] = (ego_r+obs_r)*(ego_r+obs_r) - dx*dx - dy*dy;
+    }
 }
